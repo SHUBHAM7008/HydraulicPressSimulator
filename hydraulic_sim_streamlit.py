@@ -72,7 +72,7 @@ def motor_power_kW(pressure_bar, Q_L_min, pump_eff):
 
 def energy_kJ_from_phase(pressure_bar, Q_L_min, duration_s):
     Q = Q_L_min              # m³/s
-    power_W = (pressure_bar * Q  ) /600                # W
+    power_W = ((pressure_bar * Q  ) /(600*0.9) )               # W
     energy_J = power_W * duration_s   # J
     return energy_J         # → kJ
 
@@ -90,7 +90,7 @@ with st.sidebar:
     motor_rpm = st.number_input("Motor RPM", value=1800, step=10)
     pump_eff = st.number_input("Pump efficiency", value=0.9, min_value=0.1, max_value=1.0)
     system_loss_bar = st.number_input("System losses (bar)", value=10.0, step=1.0)
-    g_val = st.number_input("Gravity g (m/s^2)", value=9.81, format="%.3f")
+    # g_val = st.number_input("Gravity g (m/s^2)", value=9.81, format="%.3f")
 
     st.markdown("---")
     st.header("Duty cycle phases (mm/sec and seconds)")
@@ -482,8 +482,8 @@ inputs_dict = {
     "Holding load (ton)": holding_load_ton,
     "Motor RPM": motor_rpm,
     "Pump efficiency": pump_eff,
-    "System loss (bar)": system_loss_bar,
-    "Gravity g (m/s²)": g_val
+    "System loss (bar)": system_loss_bar
+    # "Gravity g (m/s²)": g_val
 }
 results_dict = {
     "Pressure Fast Down (bar)": f"{pressure_fast_down:.2f}",
@@ -510,6 +510,24 @@ df_phase_out = pd.DataFrame({
     "Motor Power (kW)": [motor_kw_fast_down, motor_kw_working, motor_kw_holding, motor_kw_fast_up],
     "Energy (kJ)": [e_fast_down, e_working, e_holding, e_fast_up]
 })
+
+
+fig_energy, ax = plt.subplots(figsize=(6,4))
+bars = ax.bar(df_phase_out["Phase"], df_phase_out["Energy (kJ)"], 
+              color=["orange","red","purple","green"])
+
+# Add labels on top of bars
+ax.bar_label(bars, fmt="%.2f", padding=3)
+
+ax.set_ylabel("Energy (kJ)")
+ax.set_xlabel("Phase")
+ax.set_title("Energy Consumption per Phase")
+ax.grid(axis="y", linestyle="--", alpha=0.6)
+
+st.pyplot(fig_energy)
+
+
+
 df_phase_out = df_phase_out.round(2)
 pdf_buf = export_pdf(inputs_dict, results_dict, df_energy_out, df_phase_out, fig_path)
 
