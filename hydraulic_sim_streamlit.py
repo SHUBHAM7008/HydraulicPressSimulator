@@ -12,9 +12,8 @@ import math
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# -------------------
+
 # Firebase Init
-# -------------------
 if not firebase_admin._apps:  
     cred = credentials.Certificate("firebase_key.json")
     firebase_admin.initialize_app(cred, {
@@ -28,9 +27,8 @@ st.set_page_config(layout="wide", page_title="Hydraulic Press Simulator")
 
 g = 9.81  # m/s²
 
-# -------------------
-# Calculation helpers
-# -------------------
+
+# Cal
 def mm_to_m(x):
     return x / 1000.0
 
@@ -90,17 +88,14 @@ with st.sidebar:
     motor_rpm = st.number_input("Motor RPM", value=1800, step=10)
     pump_eff = st.number_input("Pump efficiency", value=0.9, min_value=0.1, max_value=1.0)
     system_loss_bar = st.number_input("System losses (bar)", value=10.0, step=1.0)
-    # g_val = st.number_input("Gravity g (m/s^2)", value=9.81, format="%.3f")
 
-    st.markdown("---")
-    st.header("Duty cycle phases (mm/sec and seconds)")
-    fast_down_speed = st.number_input("Fast Down speed (mm/s)", value=200.0)
-    fast_down_time = st.number_input("Fast Down time (s)", value=1.0, format="%.2f")
-    working_speed = st.number_input("Working speed (mm/s)", value=10.0)
-    working_time = st.number_input("Working time (s)", value=5.0, format="%.2f")
-    holding_time = st.number_input("Holding time (s)", value=2.0, format="%.2f")
-    fast_up_speed = st.number_input("Fast Up speed (mm/s)", value=200.0)
-    fast_up_time = st.number_input("Fast Up time (s)", value=1.25, format="%.2f")
+    fast_down_speed = 200.0 
+    fast_down_time =1.0 
+    working_speed = 10.0 
+    working_time = 5.0 
+    holding_time = 2.0 
+    fast_up_speed = 200.0 #st.number_input("Fast Up speed (mm/s)", value=200.0)
+    fast_up_time = 1.25 # st.number_input("Fast Up time (s)", value=1.25, format="%.2f")
 
 
 # Calculations
@@ -118,8 +113,6 @@ pressure_fast_down = pa_to_bar(pressure_required(dead_force_N, A_bore)) + system
 working_pressure_bar = pa_to_bar(pressure_required(holding_force_N, A_bore)) + system_loss_bar
 pressure_holding = working_pressure_bar
 retract_pressure_bar = pa_to_bar(pressure_required(dead_force_N, A_ann)) + system_loss_bar
-
-
 
 # flows
 q_fast_down = flow_rate_Lpm(A_bore, fast_down_speed)
@@ -184,7 +177,7 @@ st.write(pd.DataFrame({
 
 # Build cycle
 def build_cycle_ts():
-    dt = 0.05  
+    dt = 0.09  
     phase_pressures = [
         ("Fast Down", fast_down_time, -fast_down_speed, pressure_fast_down, q_fast_down),
         ("Working", working_time, -working_speed, working_pressure_bar, q_working),
@@ -240,12 +233,20 @@ st.subheader("Generated Cycle Data")
 st.dataframe(df_cycle.head())
 
 # Firebase upload
-def upload_to_firebase(df):
+def upload_to_firebase(df, total_energy_kJ):
     timestamp = str(int(time.time()))
     doc_ref = db.collection("hydraulic_cycles").document(timestamp)
+
     data = df.to_dict(orient="records")
-    doc_ref.set({"cycle_data": data, "created_at": timestamp})
+
+    doc_ref.set({
+        "cycle_data": data,
+        "total_energy_kJ": float(total_energy_kJ),  
+        "created_at": timestamp
+    })
+
     return timestamp
+
 
 st.subheader("Cycle plot (animated)")
 placeholder = st.empty()
@@ -253,7 +254,6 @@ placeholder = st.empty()
 fig, ax = plt.subplots(3,1, figsize=(8,8), sharex=True)
 ax[0].plot(times, strokes, color="tab:blue")
 ax[0].set_ylabel("Stroke (mm)")
-ax[0].invert_yaxis()
 ax[0].grid(True, linestyle="--", alpha=0.6)
 
 ax[1].plot(times, flows, color="tab:green")
@@ -300,7 +300,7 @@ if st.button("Run slow animation"):
         a2[0].scatter(times[i], strokes[i], color=stroke_color, s=50, zorder=5)
         a2[0].set_ylabel("Stroke (mm)")
         a2[0].set_title("Cylinder Stroke vs Time")
-        a2[0].invert_yaxis()
+       
         a2[0].grid(True, linestyle="--", alpha=0.6)
 
         # Flow Plot 
@@ -329,20 +329,9 @@ if st.button("Run slow animation"):
         # time.sleep(0.1)
 
     st.success(" Animation finished with phase highlights!")
-    doc_id = upload_to_firebase(df_cycle)
+    doc_id = upload_to_firebase(df_cycle,total_energy_kJ)
     st.success(f" Uploaded to Firebase (Doc ID: {doc_id})")
 
-# -------------------
-# Export: CSV
-# -------------------
-st.markdown("---")
-st.subheader("Export data")
-df_cycle = pd.DataFrame({"time_s": times, "stroke_mm": strokes, "flow_L_min": flows, "pressure_bar": pressures})
-buf = io.StringIO()
-df_cycle.to_csv(buf, index=False)
-st.download_button("Download cycle CSV", data=buf.getvalue(), file_name="hydraulic_cycle.csv", mime="text/csv")
-
-st.info("Use the inputs to tweak parameters and re-run. Animation uses a simple frame loop for smooth playback.")
 
 #===================================================================================================================================================
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
@@ -359,7 +348,7 @@ import io
 # Register Times New Roman
 pdfmetrics.registerFont(TTFont('TimesNewRoman', 'times.ttf'))  # requires times.ttf in your system or project folder
 
-def export_pdf(inputs, results, df_energy, df_phase_out, fig_path):
+def export_pdf(inputs, results, df_energy, df_phase_out, fig_path,fig_energy_path):
     buffer = io.BytesIO()
 
     def add_border(canvas, doc):
@@ -458,17 +447,23 @@ def export_pdf(inputs, results, df_energy, df_phase_out, fig_path):
     story.append(tbl)
     story.append(Spacer(1, 12))
 
-    # Graph 
+    # Cycle Graphs
     story.append(Paragraph("Cycle Graphs", heading_style))
     story.append(RLImage(fig_path, width=400, height=300))
+    story.append(Spacer(1, 12))
+
+    # Energy Graph
+    story.append(Paragraph("Energy Consumption per Phase", heading_style))
+    story.append(RLImage(fig_energy_path, width=400, height=300))
+    story.append(Spacer(1, 12))
     doc.build(story, onFirstPage=add_border, onLaterPages=add_border)
 
+
     buffer.seek(0)
+
     return buffer
 
-# Buttons in Streamlit
-st.markdown("---")
-st.subheader("Export PDF / Word")
+
 
 # Save last plot as image
 fig_path = "cycle_plot.png"
@@ -512,26 +507,41 @@ df_phase_out = pd.DataFrame({
 })
 
 
-fig_energy, ax = plt.subplots(figsize=(6,4))
+fig_energy, ax = plt.subplots(figsize=(14,4))
 bars = ax.bar(df_phase_out["Phase"], df_phase_out["Energy (kJ)"], 
-              color=["orange","red","purple","green"])
+              color=["orange","red","purple","green"],width=0.4)
 
 # Add labels on top of bars
-ax.bar_label(bars, fmt="%.2f", padding=3)
+ax.bar_label(bars, fmt="%.2f")
 
 ax.set_ylabel("Energy (kJ)")
 ax.set_xlabel("Phase")
 ax.set_title("Energy Consumption per Phase")
-ax.grid(axis="y", linestyle="--", alpha=0.6)
+ax.grid(axis="y", linestyle="--", alpha=0.8)
 
 st.pyplot(fig_energy)
+fig_energy_path = "energy_plot.png"
+fig_energy.savefig(fig_energy_path)
+plt.close(fig_energy)
 
 
+# -------------------
+# Export: CSV
+# -------------------
+st.markdown("---")
+st.subheader("Export data")
+df_cycle = pd.DataFrame({"time_s": times, "stroke_mm": strokes, "flow_L_min": flows, "pressure_bar": pressures})
+buf = io.StringIO()
+df_cycle.to_csv(buf, index=False)
+st.download_button("Download cycle CSV", data=buf.getvalue(), file_name="hydraulic_cycle.csv", mime="text/csv")
 
+# Buttons in Streamlit
+st.markdown("---")
+st.subheader("Export PDF / Word")
 df_phase_out = df_phase_out.round(2)
-pdf_buf = export_pdf(inputs_dict, results_dict, df_energy_out, df_phase_out, fig_path)
-
+pdf_buf = export_pdf(inputs_dict, results_dict, df_energy_out, df_phase_out, fig_path,fig_energy_path)
 st.download_button("Download PDF Report", data=pdf_buf, file_name="hydraulic_report.pdf", mime="application/pdf")
+
 
 # Import CSV
 st.markdown("---")
